@@ -1,120 +1,96 @@
-from flask import Blueprint, request, jsonify, abort
+from flask import Blueprint, request, jsonify, g
 from .database import get_db
-import bcrypt
-import re
-import sqlite3
+from .services import UserService
+from .auth import token_required, generate_token
+from .errors import bad_request_error, unauthorized_error, forbidden_error, not_found_error, conflict_error
 
 bp = Blueprint('routes', __name__)
 
-EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+@bp.before_request
+def before_request():
+    g.user_service = UserService(get_db())
 
 @bp.route('/')
 def home():
     return jsonify({"status": "ok", "message": "User Management System"}), 200
 
 @bp.route('/users', methods=['GET'])
+@token_required
 def get_all_users():
-    db = get_db()
-    users = db.execute("SELECT id, name, email FROM users").fetchall()
-    return jsonify([dict(user) for user in users]), 200
+    users = g.user_service.get_all_users()
+    return jsonify(users), 200
 
 @bp.route('/user/<int:user_id>', methods=['GET'])
+@token_required
 def get_user(user_id):
-    db = get_db()
-    user = db.execute("SELECT id, name, email FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = g.user_service.get_user_by_id(user_id)
     if user is None:
-        abort(404)
-    return jsonify(dict(user)), 200
+        return not_found_error(f"User with id {user_id} not found")
+    return jsonify(user), 200
 
 @bp.route('/users', methods=['POST'])
 def create_user():
     data = request.get_json()
     if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
+        return bad_request_error("Invalid JSON")
 
-    name = data.get('name')
-    email = data.get('email')
-    password = data.get('password')
+    user, message = g.user_service.create_user(data)
+    if user is None:
+        if message == "Email already exists":
+            return conflict_error(message)
+        return bad_request_error(message)
 
-    if not all([name, email, password]):
-        return jsonify({"error": "Missing required fields"}), 400
-
-    if not re.match(EMAIL_REGEX, email):
-        return jsonify({"error": "Invalid email format"}), 400
-
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-
-    db = get_db()
-    try:
-        db.execute("INSERT INTO users (name, email, password) VALUES (?, ?, ?)", (name, email, hashed_password))
-        db.commit()
-    except sqlite3.IntegrityError:
-        return jsonify({"error": "Email already exists"}), 409
-
-    return jsonify({"message": "User created"}), 201
+    return jsonify(user), 201
 
 @bp.route('/user/<int:user_id>', methods=['PUT'])
+@token_required
 def update_user(user_id):
     data = request.get_json()
     if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
+        return bad_request_error("Invalid JSON")
 
-    name = data.get('name')
-    email = data.get('email')
+    user, message = g.user_service.update_user(user_id, data, g.current_user)
 
-    if not all([name, email]):
-        return jsonify({"error": "Missing required fields"}), 400
+    if user is None:
+        if message == "Permission denied":
+            return forbidden_error(message)
+        if message == "User not found":
+            return not_found_error(message)
+        if message == "Email already exists":
+            return conflict_error(message)
+        return bad_request_error(message)
 
-    if not re.match(EMAIL_REGEX, email):
-        return jsonify({"error": "Invalid email format"}), 400
-
-    db = get_db()
-    try:
-        result = db.execute("UPDATE users SET name = ?, email = ? WHERE id = ?", (name, email, user_id))
-        db.commit()
-    except sqlite3.IntegrityError:
-        return jsonify({"error": "Email already exists"}), 409
-
-    if result.rowcount == 0:
-        abort(404)
-
-    return jsonify({"message": "User updated"}), 200
+    return jsonify(user), 200
 
 @bp.route('/user/<int:user_id>', methods=['DELETE'])
+@token_required
 def delete_user(user_id):
-    db = get_db()
-    result = db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-    db.commit()
-    if result.rowcount == 0:
-        abort(404)
+    success, message = g.user_service.delete_user(user_id, g.current_user)
+    if not success:
+        if message == "Permission denied":
+            return forbidden_error(message)
+        return not_found_error(message)
+
     return jsonify({"message": f"User {user_id} deleted"}), 200
 
 @bp.route('/search', methods=['GET'])
+@token_required
 def search_users():
     name = request.args.get('name')
-    if not name:
-        return jsonify({"error": "Please provide a name to search"}), 400
-
-    db = get_db()
-    users = db.execute("SELECT id, name, email FROM users WHERE name LIKE ?", (f"%{name}%",)).fetchall()
-    return jsonify([dict(user) for user in users]), 200
+    users, message = g.user_service.search_users(name)
+    if users is None:
+        return bad_request_error(message)
+    return jsonify(users), 200
 
 @bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
     if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
+        return bad_request_error("Invalid JSON")
 
-    email = data.get('email')
-    password = data.get('password')
+    user, message = g.user_service.login(data)
+    if user is None:
+        return unauthorized_error(message)
 
-    if not all([email, password]):
-        return jsonify({"error": "Missing required fields"}), 400
-
-    db = get_db()
-    user = db.execute("SELECT id, password FROM users WHERE email = ?", (email,)).fetchone()
-
-    if user and bcrypt.checkpw(password.encode('utf-8'), user['password']):
-        return jsonify({"status": "success", "user_id": user['id']}), 200
-    else:
-        return jsonify({"status": "failed", "message": "Invalid credentials"}), 401
+    token = generate_token(user.id)
+    return jsonify({'token': token}), 200
