@@ -72,3 +72,6 @@ To address these issues, the codebase was refactored with a focus on creating a 
 - **Logging:** I would implement structured logging to better trace requests and errors throughout the application.
 - **Password Complexity:** I would enforce password complexity rules on the server-side.
 - **CI/CD Pipeline:** I would set up a simple CI/CD pipeline to automatically run tests and linting on each commit.
+
+## 5. AI Usage
+- I have used Google Jules for enhanced refactoring and understanding the repository.
