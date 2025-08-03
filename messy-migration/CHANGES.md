@@ -7,17 +7,15 @@ This document outlines the major issues identified in the legacy user management
 The initial codebase, while functional, had several critical issues that affected its maintainability, security, and adherence to best practices.
 
 ### 1.1. Lack of Separation of Concerns
-- **"Fat" Route Handlers:** The `src/routes.py` file contained all the business logic, including direct database queries, data validation, and password hashing. This made the code difficult to read, test, and maintain.
+- **"Fat" Route Handlers:** The `app.py` file contained all the business logic, including direct database queries, data validation, and password hashing. This made the code difficult to read, test, and maintain.
 - **Tight Coupling:** The routes were tightly coupled to the database implementation (SQLite) and the Flask framework.
 
 ### 1.2. Critical Security Vulnerabilities
 - **No Authentication/Authorization:** This was the most severe issue. Any user could perform any action (read, update, delete) on any other user's data without being authenticated. The API was completely open.
-- **Password Hash Exposure:** The `User` model, although unused, was designed in a way that would have exposed password hashes if it were integrated into the API responses.
-- **Insecure Database Query:** The search functionality used an f-string to construct a `LIKE` query, which, while not a direct SQL injection vulnerability in this specific case (due to parameterization by the DB driver), is not a recommended practice.
+- **Insecure Database Query:** The search functionality used an f-string to construct a `LIKE` query, which is a significant SQL injection vulnerability.
 
 ### 1.3. Poor Code Quality and Best Practices
-- **Underutilized Model Layer:** A `User` dataclass existed in `src/models.py` but was completely ignored by the application logic, which operated on raw dictionary objects.
-- **Inconsistent Error Handling:** The API used a mix of `abort()` calls and manual `jsonify` error responses, leading to inconsistent error formats.
+- **Inconsistent Error Handling:** The API used a mix of `return "User not found"` and other string-based error responses, leading to inconsistent error formats.
 - **Code Duplication:** Data validation logic was duplicated across the `create_user` and `update_user` endpoints.
 
 ## 2. Changes Made and Justification
